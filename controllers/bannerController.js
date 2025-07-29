@@ -5,8 +5,6 @@ const path = require('path');
 // Create a new banner
 const createBanner = async (req, res) => {
   try {
-    const { title, description, isActive } = req.body;
-
     // Check if image was uploaded
     if (!req.file) {
       return res.status(400).json({
@@ -20,17 +18,10 @@ const createBanner = async (req, res) => {
 
     // Create new banner
     const banner = new Banner({
-      title,
-      description,
-      imageUrl,
-      isActive: isActive !== undefined ? isActive : true,
-      createdBy: req.user.userId
+      imageUrl
     });
 
     await banner.save();
-
-    // Populate creator info
-    await banner.populate('createdBy', 'name email');
 
     res.status(201).json({
       success: true,
@@ -56,6 +47,53 @@ const createBanner = async (req, res) => {
   }
 };
 
+// Create multiple banners
+const createMultipleBanners = async (req, res) => {
+  try {
+    // Check if images were uploaded
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'At least one banner image is required'
+      });
+    }
+
+    // Create image URLs array
+    const imageUrls = req.files.map(file => `/api/uploads/banners/${file.filename}`);
+
+    // Create new banner with multiple images
+    const banner = new Banner({
+      imageUrls
+    });
+
+    await banner.save();
+
+    res.status(201).json({
+      success: true,
+      message: `${req.files.length} banner images uploaded successfully`,
+      data: banner
+    });
+
+  } catch (error) {
+    // Delete uploaded files if banner creation fails
+    if (req.files && req.files.length > 0) {
+      req.files.forEach(file => {
+        const filePath = path.join(__dirname, '../uploads/banners', file.filename);
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+        }
+      });
+    }
+
+    console.error('Create Multiple Banners Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to create banners',
+      error: error.message
+    });
+  }
+};
+
 // Get all banners with pagination
 const getAllBanners = async (req, res) => {
   try {
@@ -63,22 +101,14 @@ const getAllBanners = async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
-    // Build filter query
-    const filter = {};
-    if (req.query.isActive !== undefined) {
-      filter.isActive = req.query.isActive === 'true';
-    }
-
     // Get banners with pagination
-    const banners = await Banner.find(filter)
-      .populate('createdBy', 'name email')
-      .populate('updatedBy', 'name email')
+    const banners = await Banner.find()
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit);
 
     // Get total count for pagination
-    const total = await Banner.countDocuments(filter);
+    const total = await Banner.countDocuments();
 
     res.status(200).json({
       success: true,
@@ -107,9 +137,7 @@ const getBannerById = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const banner = await Banner.findById(id)
-      .populate('createdBy', 'name email')
-      .populate('updatedBy', 'name email');
+    const banner = await Banner.findById(id);
 
     if (!banner) {
       return res.status(404).json({
@@ -138,7 +166,6 @@ const getBannerById = async (req, res) => {
 const updateBanner = async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, description, isActive } = req.body;
 
     // Find existing banner
     const banner = await Banner.findById(id);
@@ -156,30 +183,32 @@ const updateBanner = async (req, res) => {
       });
     }
 
-    // Update fields
-    if (title !== undefined) banner.title = title;
-    if (description !== undefined) banner.description = description;
-    if (isActive !== undefined) banner.isActive = isActive;
-    banner.updatedBy = req.user.userId;
-
     // Handle image update
     if (req.file) {
-      // Extract filename from current imageUrl for deletion
-      const currentFileName = banner.imageUrl.split('/').pop();
-      const oldImagePath = path.join(__dirname, '../uploads/banners', currentFileName);
-      if (fs.existsSync(oldImagePath)) {
-        fs.unlinkSync(oldImagePath);
+      // Delete old image(s) 
+      if (banner.imageUrl) {
+        const currentFileName = banner.imageUrl.split('/').pop();
+        const oldImagePath = path.join(__dirname, '../uploads/banners', currentFileName);
+        if (fs.existsSync(oldImagePath)) {
+          fs.unlinkSync(oldImagePath);
+        }
+      }
+      
+      if (banner.imageUrls && banner.imageUrls.length > 0) {
+        banner.imageUrls.forEach(imageUrl => {
+          const fileName = imageUrl.split('/').pop();
+          const oldImagePath = path.join(__dirname, '../uploads/banners', fileName);
+          if (fs.existsSync(oldImagePath)) {
+            fs.unlinkSync(oldImagePath);
+          }
+        });
       }
 
       // Update with new image
       banner.imageUrl = `/api/uploads/banners/${req.file.filename}`;
+      banner.imageUrls = []; // Clear multiple images when updating with single image
+      await banner.save();
     }
-
-    await banner.save();
-
-    // Populate user info
-    await banner.populate('createdBy', 'name email');
-    await banner.populate('updatedBy', 'name email');
 
     res.status(200).json({
       success: true,
@@ -218,11 +247,24 @@ const deleteBanner = async (req, res) => {
       });
     }
 
-    // Extract filename from imageUrl for deletion
-    const fileName = banner.imageUrl.split('/').pop();
-    const imagePath = path.join(__dirname, '../uploads/banners', fileName);
-    if (fs.existsSync(imagePath)) {
-      fs.unlinkSync(imagePath);
+    // Delete single image if exists
+    if (banner.imageUrl) {
+      const fileName = banner.imageUrl.split('/').pop();
+      const imagePath = path.join(__dirname, '../uploads/banners', fileName);
+      if (fs.existsSync(imagePath)) {
+        fs.unlinkSync(imagePath);
+      }
+    }
+
+    // Delete multiple images if exist
+    if (banner.imageUrls && banner.imageUrls.length > 0) {
+      banner.imageUrls.forEach(imageUrl => {
+        const fileName = imageUrl.split('/').pop();
+        const imagePath = path.join(__dirname, '../uploads/banners', fileName);
+        if (fs.existsSync(imagePath)) {
+          fs.unlinkSync(imagePath);
+        }
+      });
     }
 
     // Delete banner from database
@@ -243,47 +285,11 @@ const deleteBanner = async (req, res) => {
   }
 };
 
-// Toggle banner active status
-const toggleBannerStatus = async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const banner = await Banner.findById(id);
-    if (!banner) {
-      return res.status(404).json({
-        success: false,
-        message: 'Banner not found'
-      });
-    }
-
-    banner.isActive = !banner.isActive;
-    banner.updatedBy = req.user.userId;
-    await banner.save();
-
-    await banner.populate('createdBy', 'name email');
-    await banner.populate('updatedBy', 'name email');
-
-    res.status(200).json({
-      success: true,
-      message: `Banner ${banner.isActive ? 'activated' : 'deactivated'} successfully`,
-      data: banner
-    });
-
-  } catch (error) {
-    console.error('Toggle Banner Status Error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to update banner status',
-      error: error.message
-    });
-  }
-};
-
 module.exports = {
   createBanner,
+  createMultipleBanners,
   getAllBanners,
   getBannerById,
   updateBanner,
-  deleteBanner,
-  toggleBannerStatus
+  deleteBanner
 };

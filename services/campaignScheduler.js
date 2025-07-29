@@ -82,7 +82,10 @@ class CampaignScheduler {
     campaign.messageStatuses = results;
     await campaign.save();
 
+    // Reload campaign to get updated counts
+    const updatedCampaign = await Campaign.findById(campaign._id);
     console.log(`Campaign ${campaign.name} completed successfully`);
+    console.log(`Sent: ${updatedCampaign.sentCount}, Delivered: ${updatedCampaign.deliveredCount}, Failed: ${updatedCampaign.failedCount}, Pending: ${updatedCampaign.pendingCount}`);
   }
 
   // Simulate message sending (replace with actual SMS service integration)

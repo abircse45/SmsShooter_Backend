@@ -44,7 +44,10 @@ const upload = multer({
 // Middleware for single banner image upload
 const uploadBannerImage = upload.single('bannerImage');
 
-// Enhanced upload middleware with error handling
+// Middleware for multiple banner images upload (max 10 images)
+const uploadMultipleBannerImages = upload.array('bannerImages', 10);
+
+// Enhanced upload middleware with error handling for single image
 const handleBannerUpload = (req, res, next) => {
   uploadBannerImage(req, res, (err) => {
     if (err instanceof multer.MulterError) {
@@ -68,4 +71,34 @@ const handleBannerUpload = (req, res, next) => {
   });
 };
 
-module.exports = { handleBannerUpload };
+// Enhanced upload middleware with error handling for multiple images
+const handleMultipleBannerUpload = (req, res, next) => {
+  uploadMultipleBannerImages(req, res, (err) => {
+    if (err instanceof multer.MulterError) {
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({
+          success: false,
+          message: 'File size too large. Maximum size is 5MB per file.'
+        });
+      }
+      if (err.code === 'LIMIT_FILE_COUNT') {
+        return res.status(400).json({
+          success: false,
+          message: 'Too many files. Maximum 10 images allowed.'
+        });
+      }
+      return res.status(400).json({
+        success: false,
+        message: 'File upload error: ' + err.message
+      });
+    } else if (err) {
+      return res.status(400).json({
+        success: false,
+        message: err.message
+      });
+    }
+    next();
+  });
+};
+
+module.exports = { handleBannerUpload, handleMultipleBannerUpload };
